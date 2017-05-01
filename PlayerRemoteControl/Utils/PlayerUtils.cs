@@ -23,7 +23,7 @@ namespace PlayerRemoteControl {
             }
             return hh + timestamp;
         }
-        
+
         /// <summary>
         /// converts a normalized timestamp to seconds
         /// </summary>
@@ -46,6 +46,44 @@ namespace PlayerRemoteControl {
             }
 
             return -1;
+        }
+
+        /// <summary>
+        /// get the file name for the item
+        /// </summary>
+        /// <param name="fullPath">the full path of the item</param>
+        /// <returns></returns>
+        public static String getFileName(String fullPath) {
+
+            if (String.IsNullOrEmpty(fullPath)) {
+                return String.Empty;
+            }
+
+            int lastIndex = fullPath.LastIndexOf('\\');
+
+            if (lastIndex <= 0) {
+                return fullPath;
+            }
+            return fullPath.Substring(lastIndex + 1);
+        }
+
+
+        /// <summary>
+        /// perform in-place shuffle of array using fischer-yates algo
+        /// </summary>
+        /// <param name="arr">the array to be shuffled</param>
+        public static void shuffleArrayInPlace(object[] arr) {
+
+            int j = arr.Length-1;
+            Random rng = new Random();
+            while (j > 0) {
+
+                var temp = arr[j];
+                int randomIndex = rng.Next(j);
+                arr[j] = arr[randomIndex];
+                arr[randomIndex] = temp;
+                j--;
+            }
         }
     }
 }

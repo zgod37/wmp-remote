@@ -94,17 +94,19 @@ namespace PlayerRemoteControl {
         private void loadNewPlayer() {
 
             //open folder dialog box to get target file
-            String targetFile = "";
+            String[] targetFiles = null;
             using (var dialog = new OpenFileDialog()) {
+                dialog.Multiselect = true;
                 DialogResult result = dialog.ShowDialog();
                 if (result == System.Windows.Forms.DialogResult.OK) {
-                    targetFile += dialog.FileName;
+
+                    targetFiles = dialog.FileNames;
                 }
             }
 
             //if target file selected, open new form and add to children
-            if (targetFile.Length > 0) {
-                PlayerForm player = new PlayerForm(this, targetFile);
+            if (targetFiles != null) {
+                PlayerForm player = new PlayerForm(this, targetFiles, Players.Count);
                 player.Show();
             }
         }

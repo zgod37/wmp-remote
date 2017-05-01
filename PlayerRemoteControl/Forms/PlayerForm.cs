@@ -1,5 +1,6 @@
 ﻿using PlayerRemoteControl.IFaces;
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using WMPLib;
@@ -7,15 +8,33 @@ using WMPLib;
 namespace PlayerRemoteControl {
     public partial class PlayerForm : Form, IPlayer {
 
+        #region Private Properties
+
         /// <summary>
         /// keep instance of the remote so we can register as observer
         /// </summary>
-        IRemote remote;
+        private IRemote remote;
+
+        #endregion
+
+        #region Public Properties
 
         /// <summary>
         /// flag to determine whether this video is looping
         /// </summary>
         public bool IsLooping { get; set; }
+
+        /// <summary>
+        /// the current position of the playlist
+        /// </summary>
+        public int CurrentIndex { get; set; }
+
+        /// <summary>
+        /// the full paths of all the files in the playlist
+        /// </summary>
+        public String[] FilePaths { get; set; }
+
+        #endregion
 
         #region Constructor
 
@@ -23,11 +42,13 @@ namespace PlayerRemoteControl {
         /// default constructor
         /// </summary>
         /// <param name="mainForm">Reference to the main remote form</param>
-        /// <param name="url">the file path of the video to be loaded</param>
-        public PlayerForm(Form1 mainForm, String url) {
+        /// <param name="url">the file paths of the videos to be loaded</param>
+        /// <param name="id">the id number for the player</param>
+        public PlayerForm(Form1 mainForm, String[] urls, int id) {
             InitializeComponent();
 
-            this.Text = url;
+            //set title to to player id
+            this.Text = $"Player {id+1}";
 
             //register observer
             this.remote = mainForm;
@@ -39,89 +60,24 @@ namespace PlayerRemoteControl {
             //set player properties
             Player.Dock = DockStyle.Fill;
             Player.stretchToFit = true;
-            Player.URL = url;
+
+            //set player to auto-play videos in place list
+            Player.PlayStateChange += Player_PlayStateChange;
+
+            //set FilePaths to urls
+            FilePaths = urls;
+
+            //build playlist listbox using only the file names
+            fillPlaylistListBox();
+            playlistListBox.SelectedItem = playlistListBox.Items[0];
 
             //initalize timestamps
             beginTextBox.Text = "00:00:00";
             endTextBox.Text = "00:00:00";
             jumpTextBox.Text = "00:00:00";
-        }
 
-        #endregion
-
-        #region Public Methods
-
-        /// <summary>
-        /// pause the video
-        /// </summary>
-        public void pause() {
-            if (Player.playState != WMPLib.WMPPlayState.wmppsPaused)
-                Player.Ctlcontrols.pause();
-        }
-
-        /// <summary>
-        /// play/resume the video
-        /// </summary>
-        public void play() {
-            if (Player.playState != WMPLib.WMPPlayState.wmppsPlaying)
-                Player.Ctlcontrols.play();
-        }
-
-        /// <summary>
-        /// stops the video
-        /// </summary>
-        public void stop() {
-            if (Player.playState != WMPLib.WMPPlayState.wmppsStopped)
-                Player.Ctlcontrols.stop();
-        }
-
-        /// <summary>
-        /// un-register observer with mainform on closing
-        /// </summary>
-        public void close() {
-            stop();
-            remote.unregisterObserver(this);
-            this.Dispose();
-        }
-
-        /// <summary>
-        /// disable loop button - sends delegate to UI thread
-        /// </summary>
-        public void disableLoopButton() {
-            loopButton.Invoke(new Action(() => {
-                loopButton.Enabled = false;
-                loopButton.Text = "looping..";
-            }));
-        }
-
-        /// <summary>
-        /// enable loop button - sends delegate to UI thread
-        /// </summary>
-        public void enableLoopButton() {
-            loopButton.Invoke(new Action(() => {
-                loopButton.Enabled = true;
-                loopButton.Text = "loop";
-            }));
-        }
-
-        /// <summary>
-        /// disable stop button - sends delegate to UI thread
-        /// </summary>
-        public void disableStopLoopButton() {
-            stopButton.Invoke(new Action(() => {
-                stopButton.Enabled = false;
-                stopButton.Text = "stopped";
-            }));
-        }
-
-        /// <summary>
-        /// enable stop button - sends delegate to UI thread
-        /// </summary>
-        public void enableStopLoopButton() {
-            stopButton.Invoke(new Action(() => {
-                stopButton.Enabled = true;
-                stopButton.Text = "stop";
-            }));
+            //auto-play the first video in playlist
+            playVideo(FilePaths[0]);
         }
 
         #endregion
@@ -143,6 +99,25 @@ namespace PlayerRemoteControl {
 
         #region WMP Handlers
 
+        /// <summary>
+        /// event handler to handle when the play state of player changes
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void Player_PlayStateChange(object sender, AxWMPLib._WMPOCXEvents_PlayStateChangeEvent e) {
+
+            //if finished playing video, load the next video
+            if (e.newState == (int)WMPPlayState.wmppsMediaEnded) {
+                this.BeginInvoke(new Action(() => { playNextVideo(); }));
+            }
+
+        }
+
+        /// <summary>
+        /// event handler to display any errors encountered by the player
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         private void Player_MediaError(object sender, AxWMPLib._WMPOCXEvents_MediaErrorEvent e) {
             //if media error is called, check and notify user if file is missing or corrupt
             try {
@@ -152,6 +127,19 @@ namespace PlayerRemoteControl {
             } catch (InvalidCastException ex) {
                 MessageBox.Show("Error received:" + ex.Message);
             }
+        }
+
+        #endregion
+
+        #region Playlist Listbox Handlers
+
+        /// <summary>
+        /// event handler to play the item that was double clicked in a list box
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void playlistListBox_MouseDoubleClick(object sender, MouseEventArgs e) {
+            playVideoAtIndex(playlistListBox.SelectedIndex);
         }
 
         #endregion
@@ -177,13 +165,26 @@ namespace PlayerRemoteControl {
             prepareForLoop();
         }
 
+        private void addButton_Click(object sender, EventArgs e) {
+            shufflePlaylist();
+        }
+
         /// <summary>
-        /// event handler to go full screen
+        /// play the next video in the list
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        private void fullScreenButton_Click(object sender, EventArgs e) {
-            goFullScreen();
+        private void nextButton_Click(object sender, EventArgs e) {
+            playNextVideo();
+        }
+
+        /// <summary>
+        /// play the previous video in the list
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void prevButton_Click(object sender, EventArgs e) {
+            playPreviousVideo();
         }
 
         #endregion
@@ -287,6 +288,16 @@ namespace PlayerRemoteControl {
                         showControls();
                         break;
 
+                    //Alt + Left to hide playlist
+                    case Keys.Left:
+                        showPlaylist();
+                        break;
+
+                    //Alt + Right to show playlist
+                    case Keys.Right:
+                        hidePlaylist();
+                        break;
+
                     default:
                         break;
 
@@ -300,10 +311,141 @@ namespace PlayerRemoteControl {
 
         #endregion
 
+        #region Public Methods
+
+        /// <summary>
+        /// pause the video
+        /// </summary>
+        public void pause() {
+            if (Player.playState != WMPLib.WMPPlayState.wmppsPaused)
+                Player.Ctlcontrols.pause();
+        }
+
+        /// <summary>
+        /// play/resume the video
+        /// </summary>
+        public void play() {
+            if (Player.playState != WMPLib.WMPPlayState.wmppsPlaying)
+                Player.Ctlcontrols.play();
+        }
+
+        /// <summary>
+        /// stops the video
+        /// </summary>
+        public void stop() {
+            if (Player.playState != WMPLib.WMPPlayState.wmppsStopped)
+                Player.Ctlcontrols.stop();
+        }
+
+        /// <summary>
+        /// un-register observer with mainform on closing
+        /// </summary>
+        public void close() {
+            stop();
+            remote.unregisterObserver(this);
+            this.Dispose();
+        }
+
+        /// <summary>
+        /// disable loop button - sends delegate to UI thread
+        /// </summary>
+        public void disableLoopButton() {
+            loopButton.Invoke(new Action(() => {
+                loopButton.Enabled = false;
+                loopButton.Text = "looping..";
+            }));
+        }
+
+        /// <summary>
+        /// enable loop button - sends delegate to UI thread
+        /// </summary>
+        public void enableLoopButton() {
+            loopButton.Invoke(new Action(() => {
+                loopButton.Enabled = true;
+                loopButton.Text = "loop";
+            }));
+        }
+
+        /// <summary>
+        /// disable stop button - sends delegate to UI thread
+        /// </summary>
+        public void disableStopLoopButton() {
+            stopButton.Invoke(new Action(() => {
+                stopButton.Enabled = false;
+                stopButton.Text = "stopped";
+            }));
+        }
+
+        /// <summary>
+        /// enable stop button - sends delegate to UI thread
+        /// </summary>
+        public void enableStopLoopButton() {
+            stopButton.Invoke(new Action(() => {
+                stopButton.Enabled = true;
+                stopButton.Text = "stop";
+            }));
+        }
+
+        #endregion
+
         #region Private Methods
 
         /// <summary>
-        /// intialize the necessary components to start the looping task
+        /// play the given url in the player
+        /// </summary>
+        /// <param name="filePath">the full path of the file to load</param>
+        private void playVideo(String filePath) {
+            Player.URL = filePath;
+            play();
+        }
+
+        /// <summary>
+        /// play the next video in the playlist using the current index
+        /// </summary>
+        private void playNextVideo() {
+
+            //loop entire playlist by default
+            if (CurrentIndex >= FilePaths.Length-1) {
+                CurrentIndex = 0;
+            } else {
+                CurrentIndex++;
+            }
+
+            //play next video and update the list box
+            playVideo(FilePaths[CurrentIndex]);
+            playlistListBox.SelectedItem = playlistListBox.Items[CurrentIndex];
+        }
+
+        /// <summary>
+        /// play the previous video in the playlist using current index
+        /// </summary>
+        private void playPreviousVideo() {
+
+            //stop if at beginning of list
+            if (CurrentIndex == 0) {
+                stop();
+                return;
+            } else {
+                CurrentIndex--;
+            }
+            
+            //play previous video and update listbox
+            playVideo(FilePaths[CurrentIndex]);
+            playlistListBox.SelectedItem = playlistListBox.Items[CurrentIndex];
+            
+        }
+            
+        /// <summary>
+        /// play the video at the given index
+        /// </summary>
+        /// <param name="index">the desired index of the video</param>
+        private void playVideoAtIndex(int index) {
+            playVideo(FilePaths[index]);
+            CurrentIndex = index;
+        }
+
+        /// <summary>
+        /// intialize the necessary components to start the async looping task
         /// </summary>
         private void prepareForLoop() {
 
@@ -315,7 +457,7 @@ namespace PlayerRemoteControl {
             int start = PlayerUtils.ConvertTimestampToSeconds(beginTextBox.Text);
             int end = PlayerUtils.ConvertTimestampToSeconds(endTextBox.Text);
 
-            //bail if timestamps are bogus
+            //bail if timestamps are invalid
             if (start == -1 || end == -1 || start > end) {
                 return;
             }
@@ -376,15 +518,32 @@ namespace PlayerRemoteControl {
         /// hides the bottom row of controls
         /// </summary>
         private void hideControls() {
-            tableLayoutPanel1.RowStyles[1].SizeType = SizeType.Absolute;
-            tableLayoutPanel1.RowStyles[1].Height = 0;
+            parentTableLayoutPanel.RowStyles[1].SizeType = SizeType.Absolute;
+            parentTableLayoutPanel.RowStyles[1].Height = 0;
         }
 
         /// <summary>
         /// shows the bottom row of controls
         /// </summary>
         private void showControls() {
-            tableLayoutPanel1.RowStyles[1].SizeType = SizeType.AutoSize;
+            parentTableLayoutPanel.RowStyles[1].SizeType = SizeType.AutoSize;
+        }
+
+
+        /// <summary>
+        /// hide the playlist list box and controls
+        /// </summary>
+        private void hidePlaylist() {
+            parentTableLayoutPanel.ColumnStyles[0].SizeType = SizeType.Absolute;
+            parentTableLayoutPanel.ColumnStyles[0].Width = 0;
+        }
+
+        /// <summary>
+        /// show the playlist list box and controls
+        /// </summary>
+        private void showPlaylist() {
+            parentTableLayoutPanel.ColumnStyles[0].SizeType = SizeType.Percent;
+            parentTableLayoutPanel.ColumnStyles[0].Width = 20;
         }
 
         /// <summary>
@@ -429,7 +588,49 @@ namespace PlayerRemoteControl {
             jumpTextBox.Enabled = true;
         }
 
+        /// <summary>
+        /// fill the playlist list box with the file names in FilePaths
+        /// </summary>
+        private void fillPlaylistListBox() {
+            playlistListBox.Items.AddRange(FilePaths.Select(filePath => PlayerUtils.getFileName(filePath)).ToArray());
+        }
+
+        /// <summary>
+        /// shuffle the current playlist
+        /// </summary>
+        private void shufflePlaylist() {
+
+            //save current item for highlighting in listbox and updating current index
+            var currentItem = playlistListBox.Items[CurrentIndex];
+
+            //shuffle the filePath list
+            PlayerUtils.shuffleArrayInPlace(FilePaths);
+
+            //update the list box with new item order
+            playlistListBox.Items.Clear();
+            fillPlaylistListBox();
+
+            //update the UI and current index to reflect new order
+            playlistListBox.SelectedItem = currentItem;
+            CurrentIndex = playlistListBox.Items.IndexOf(currentItem);
+        }
+
+        /// <summary>
+        /// set the actual WMP playlist of the Player (currently unused)
+        /// </summary>
+        /// <param name="filePath">the list of file paths</param>
+        private void setPlayerPlaylist(String[] filePath) {
+            //build playlist
+            var playlist = Player.playlistCollection.newPlaylist("playlist");
+            foreach (String url in filePath) {
+                var item = Player.newMedia(url);
+                playlist.appendItem(item);
+            }
+            Player.currentPlaylist = playlist;
+        }
+
         #endregion
 
+        
     }
 }
